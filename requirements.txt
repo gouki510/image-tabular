@@ -1,0 +1,12 @@
+albumentations==1.1.0
+hydra-core==1.1.1
+natsort==8.1.0
+numpy==1.22.1
+opencv_python_headless==4.5.5.62
+pandas==1.4.0
+Pillow==9.0.1
+pydicom==2.1.2
+pytorch_lightning==1.5.9
+scikit_learn==1.0.2
+torch==1.10.2
+torchvision==0.11.3
