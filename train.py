@@ -8,13 +8,11 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import LightningDataModule, LightningModule
 from pytorch_lightning import loggers
-from efficientnet_pytorch import EfficientNet
-import yaml
 import hydra
 import os
 
 
-@hydra.main(config_name="config")
+@hydra.main(config_path="config",config_name="config")
 def main(config):
     datamodule = MyDataModule(config)
     model = Model(config)

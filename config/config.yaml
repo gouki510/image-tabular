@@ -1,0 +1,18 @@
+hydra:
+  run:
+    dir: new3DCNN_L1
+
+data_dir: "/home/gouki/image-tabular/data"
+img_size: 224
+crop_size: 500
+data_csv: "/home/gouki/image-tabular/data/train.csv"
+batch_size: 16
+model_type: "3DCNN"
+loss_type: "L1"
+num_layer: 3
+hidden_size: 256
+
+lr: 0.01
+lr_decay_freq: 10
+epoch: 30
+gpu: [0]

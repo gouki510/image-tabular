@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
+from torchvision import models
 import pytorch_lightning as pl
 from albumentations import (
     Compose,
@@ -21,43 +22,57 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import LightningDataModule, LightningModule
 from pytorch_lightning import loggers
-from efficientnet_pytorch import EfficientNet
+from models import CNNLSTM,CNN,DCNN
 
 class Model(pl.LightningModule):
     
     def __init__(self,cfg):
         super().__init__()
-        self.backbone = self.load_model(cfg["backbone"])
         self.lr = cfg["lr"]
         self.lr_decay_freq = cfg["lr_decay_freq"] 
-        self.embedding = None
+        self.num_layer = cfg["num_layer"]
+        self.hidden_size = cfg["hidden_size"]
+        self.loss_type = cfg["loss_type"]
+        self.model_type = cfg["model_type"]
+        if  self.model_type == "CNN":
+            self.embedder = CNN(self.hidden_size)
+        elif self.model_type == "CNNLSTM":
+            self.embedder = CNNLSTM(self.num_layer,self.hidden_size)
+        elif self.model_type == "3DCNN":
+            self.embedder = DCNN(self.hidden_size)
         self.dropout = nn.Dropout(0.2)
-        self.predict = nn.Linear(in_features=140,out_features=1,bias=True)
+        self.predict = nn.Sequential(
+            nn.Linear(in_features=self.hidden_size+4,out_features=128,bias=True),
+            nn.ReLU(),
+            nn.Linear(in_features=128,out_features=1,bias=True),
+        )
         
     def training_step(self,batch,batch_idx):
         images, metadatas, targets = batch
-        images = images['image']
-        self.embedding = self.dropout(self.backbone(images))
-        self.concat = torch.cat((self.embedding,metadatas),1)
-        pred = self.predict(self.concat)
-        loss = torch.sqrt(torch.mean((pred-targets)**2))
+        images = images
+        self.embedding = self.embedder(images,metadatas)
+        pred = self.predict(self.embedding)
+        loss = self.loss_fn(pred,targets,self.loss_type)
         return {"loss": loss, "preds": pred.clone().detach(), "targets": targets.clone().detach()}
     
     def validation_step(self,batch,batch_idx):
         images, metadatas, targets = batch
-        images = images['image']
-        self.embedding = self.backbone(images)
-        self.concat = torch.cat((self.embedding,metadatas),1)
-        pred = self.predict(self.concat)
-        loss = torch.sqrt(torch.mean((pred-targets)**2))
+        self.embedding = self.embedder(images,metadatas)
+        pred = self.predict(self.embedding)
+        loss = self.loss_fn(pred,targets,self.loss_type)
         return {"loss": loss, "preds": pred.clone().detach(), "targets": targets.clone().detach()}
     
     def test_step(self,batch,batch_idx):
-        images, targets = batch
-        images = images['image']
-        pred = self.backbone(images)
-        loss = torch.sqrt(torch.mean((pred-targets)**2))
-        return {"loss": loss, "preds": pred.clone().detach(), "targets": targets.clone().detach()}
+        images, metadatas = batch
+        self.embedding = self.embedder(images,metadatas)
+        pred = self.predict(self.embedding)
+        return { "preds": pred.clone().detach()}
+    
+    def loss_fn(self,pred,targets,loss_type):
+        if loss_type=="L2":
+            return torch.sqrt(torch.mean((pred-targets)**2))
+        elif loss_type=="L1":
+            return torch.mean(torch.abs(pred-targets))
     
     def training_epoch_end(self, outputs):
         self.__share_epoch_end(outputs, 'train')
@@ -67,33 +82,21 @@ class Model(pl.LightningModule):
     
     def __share_epoch_end(self, outputs, mode):
         preds = []
-        labels = []
+        targets = []
         for out in outputs:
             pred, label = out['preds'], out['targets']
             preds.append(pred)
-            labels.append(label)
+            targets.append(label)
         preds = torch.cat(preds)
-        labels = torch.cat(labels)
-        metrics = torch.sqrt(torch.mean((preds-labels)**2))
+        targets = torch.cat(targets)
+        metrics = self.loss_fn(preds,targets,self.loss_type)
         self.log(f'{mode}_loss', metrics)
             
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
-            self.backbone.parameters(), lr=self.lr, weight_decay=1e-5
+            self.embedder.parameters(), lr=self.lr, weight_decay=1e-5
         )
         step_lr = torch.optim.lr_scheduler.StepLR(
             optimizer, step_size=self.lr_decay_freq, gamma=0.7
         )
         return [optimizer], [step_lr]
-
-    def load_model(self,backbone):
-        if backbone=="EfficientNet":
-            model_effnet = EfficientNet.from_name("efficientnet-b2").cuda()
-            model_effnet.load_state_dict(torch.load("/home/gominegishi/data/kgl/pet/efficientnet-b2-27687264.pth"))
-            model_effnet._fc = nn.Sequential(
-                nn.Linear(in_features=1408, out_features=128, bias=True),
-                nn.ReLU()
-            )
-
-        return model_effnet
-            
